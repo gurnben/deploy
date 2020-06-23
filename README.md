@@ -90,7 +90,9 @@ Either way you choose to go, you are going to need a `pull-secret`. We are still
 
 We've added a very simple `start.sh` script to make your life easier. 
 
-First, you need to export KUBECONFIG=/path/to/some/cluster/kubeconfig
+First, you need to `export KUBECONFIG=/path/to/some/cluster/kubeconfig` (or do an `oc login` that will set it for you), `deploy` will install to the cluster pointed to by the current KUBECONFIG!  
+
+**If you're deploying a downstream build or a 1.X.X build of OCM/ACM** `export COMPOSITE_BUNDLE=true`.  Export `CUSTOM_REGISTRY_REPO="quay.io/acm-d"` if you want to deploy the downstream build from a repo other than `open-cluster-management` (which you probably do!).  Make sure you have `snapshot.ver` set to a downstream build, or pass it into the start.sh script!
 
 1. Run the `start.sh` script. You have the following options (use one at a time) when you run the command: 
 
@@ -144,6 +146,7 @@ for helmrelease in $(oc get helmreleases.apps.open-cluster-management.io | tail 
 
 2. Update the `kustomization.yaml` file in the `acm-operator` dir to set `newTag`
   You can find a snapshot tag by viewing the list of tags available [here](https://quay.io/open-cluster-management/acm-custom-registry) Use a tag that has the word `SNAPSHOT` in it.
+  For downstream deploys, make sure to set `newName` differently, usually to `acm-d`.  
     ```bash
     namespace: open-cluster-management
 
@@ -177,7 +180,7 @@ for helmrelease in $(oc get helmreleases.apps.open-cluster-management.io | tail 
 
 5. Once the `open-cluster-management` CatalogSource is healthy you can deploy the `example-multiclusterhub-cr.yaml`
     ```bash
-    apiVersion: operators.open-cluster-management.io/v1beta1
+    apiVersion: operator.open-cluster-management.io/v1
     kind: MultiClusterHub
     metadata:
       name: multiclusterhub

@@ -98,6 +98,7 @@ oc get csv | grep "etcd" | awk '{ print $1 }' | xargs oc delete csv --wait=false
 oc get crd | grep "etcd" | awk '{ print $1 }' | xargs oc delete crd --wait=false --ignore-not-found || true
 oc get scc | grep "multicluster" | awk '{ print $1 }' | xargs oc delete scc --wait=false --ignore-not-found || true
 oc get scc | grep "multicloud" | awk '{ print $1 }' | xargs oc delete scc --wait=false --ignore-not-found || true
+oc get scc | grep "kui-proxy" | awk '{ print $1 }' | xargs oc delete scc --wait=false --ignore-not-found || true
 oc get crd | grep "certmanager" | awk '{ print $1 }' | xargs oc delete crd --wait=false --ignore-not-found || true
 oc get crd | grep "mcm" | awk '{ print $1 }' | xargs oc delete crd --wait=false --ignore-not-found || true
 oc get crd | grep "ibm" | awk '{ print $1 }' | xargs oc delete crd --wait=false --ignore-not-found || true
@@ -131,9 +132,22 @@ oc delete clusterrolebinding readonly-clusterimagesets || true
 oc delete oauthclient multicloudingress || true
 
 # rcm
+# 1.x
 oc delete crd endpointconfigs.multicloud.ibm.com || true
+# 2.x
+oc delete crd klusterletconfigs.agent.open-cluster-management.io || true
+
 oc delete clusterrole rcm-controller || true
 oc delete clusterrolebinding rcm-controller || true
+
+# workaround for https://github.com/open-cluster-management/backlog/issues/2915 
+oc delete apiservice v1.admission.cluster.open-cluster-management.io v1beta1.proxy.open-cluster-management.io
+oc delete ValidatingWebhookConfiguration managedclustervalidators.admission.cluster.open-cluster-management.io
+
+# clean up the `-hub` namespace for 2.x
+oc delete ns open-cluster-management-hub
+
+
 
 
 # if we are on a managed-cluster let's remove it's stuff too

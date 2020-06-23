@@ -8,7 +8,8 @@
 # ./start.sh --watch, this monitors for status during the main deploy of Red Hat ACM
 
 # CONSTANTS
-TOTAL_POD_COUNT=35
+TOTAL_POD_COUNT_1X=35
+TOTAL_POD_COUNT_2X=41
 
 function waitForPod() {
     FOUND=1
@@ -138,17 +139,38 @@ if [ "${DEFAULT_SNAPSHOT}" == "MUST_PROVIDE_SNAPSHOT" ]; then
     echo "ERROR: Please specify a valid snapshot tag to continue."
     exit 2
 fi
-if [[ ! $DEFAULT_SNAPSHOT == 1.0.0-* ]]; then
-    echo "ERROR: invalid SNAPSHOT format... snapshot must begin with '1.0.0-'"
+SNAPSHOT_PREFIX=${DEFAULT_SNAPSHOT%%\-*}
+echo "* Downstream: ${DOWNSTREAM}   Release Version: $SNAPSHOT_PREFIX"
+if [[ (! $SNAPSHOT_PREFIX == *.*.*) && ("$DOWNSTREAM" != "true") ]]; then
+    echo "ERROR: invalid SNAPSHOT format... snapshot must begin with 'X.0.0-' not '$SNAPSHOT_PREFIX', if DOWNSTREAM isn't set"
     exit 1
 fi
+
+# Change our expected pod count based on what version snapshot we detect, defaulting to 1.0 (smallest number of pods as of writing)
+if [[ $DEFAULT_SNAPSHOT == *1.0* ]]; then
+    TOTAL_POD_COUNT=${TOTAL_POD_COUNT_1X}
+elif [[ $DEFAULT_SNAPSHOT == *2.0* ]]; then
+    TOTAL_POD_COUNT=${TOTAL_POD_COUNT_2X}
+else
+    TOTAL_POD_COUNT=${TOTAL_POD_COUNT_1X}
+    echo "Snapshot doesn't contain a version number we recognize, looking for the 1.X release pod count of ${TOTAL_POD_COUNT} if wait is selected."
+fi
+
+# Set the custom registry repo, defaulted to quay.io/open-cluster-management, but accomodate custom config focused on quay.io/acm-d for donwstream tests
+CUSTOM_REGISTRY_REPO=${CUSTOM_REGISTRY_REPO:-"quay.io/open-cluster-management"}
+
+# If the user sets the COMPOSITE_BUNDLE flag to "true", then set to the `acm` variants of variables, otherwise the multicluster-hub version.  
+if [[ "$COMPOSITE_BUNDLE" == "true" ]]; then OPERATOR_DIRECTORY="acm-operator"; else OPERATOR_DIRECTORY="multicluster-hub-operator"; fi;
+if [[ "$COMPOSITE_BUNDLE" == "true" ]]; then CUSTOM_REGISTRY_IMAGE="acm-custom-registry"; else CUSTOM_REGISTRY_IMAGE="multicluster-hub-custom-registry"; fi;
 
 printf "* Using: ${DEFAULT_SNAPSHOT}\n\n"
 
 echo "* Applying SNAPSHOT to multiclusterhub-operator subscription"
-${SED} -i "s/newTag: .*$/newTag: ${DEFAULT_SNAPSHOT}/g" ./acm-operator/kustomization.yaml
+${SED} -i "s/newTag: .*$/newTag: ${DEFAULT_SNAPSHOT}/g" ./$OPERATOR_DIRECTORY/kustomization.yaml
+echo "* Applying CUSTOM_REGISTRY_REPO to multiclusterhub-operator subscription"
+${SED} -i "s|newName: .*$|newName: ${CUSTOM_REGISTRY_REPO}/${CUSTOM_REGISTRY_IMAGE}|g" ./$OPERATOR_DIRECTORY/kustomization.yaml
 echo "* Applying multicluster-hub-cr values"
-${SED} -i "s/imageTagSuffix: .*$/imageTagSuffix: ${DEFAULT_SNAPSHOT/1.0.0-/}/" ./multiclusterhub/example-multiclusterhub-cr.yaml
+${SED} -i "s/imageTagSuffix: .*$/imageTagSuffix: ${DEFAULT_SNAPSHOT/${SNAPSHOT_PREFIX}-/}/" ./multiclusterhub/example-multiclusterhub-cr.yaml
 ${SED} -i "s/example-multiclusterhub/multiclusterhub/" ./multiclusterhub/example-multiclusterhub-cr.yaml
 
 if [[ " $@ " =~ " -t " ]]; then
@@ -156,12 +178,26 @@ if [[ " $@ " =~ " -t " ]]; then
     exit 0
 fi
 
+printf "\n##### Creating the $TARGET_NAMESPACE namespace\n"
+kubectl create ns $TARGET_NAMESPACE
+
+seconds=0
+while [ -z $(kubectl get sa -n $TARGET_NAMESPACE -o name default) ]; do
+    echo "--- waiting for namespace: $TARGET_NAMESPACE to create with default service account ---"
+    sleep 10
+    (( seconds=seconds+10 ))
+    if [ "$seconds" -gt 60 ]; then
+        echo "--- waited 60 seconds for namespace: $TARGET_NAMESPACE but it never came up with default service account, exiting ---"
+        exit 1;
+    fi
+done;
+
 printf "\n##### Applying prerequisites\n"
 kubectl apply --openapi-patch=true -k prereqs/
 
-printf "\n##### Applying acm-operator subscription #####\n"
-kubectl apply -k acm-operator/
-waitForPod "multiclusterhub-operator" "acm-custom-registry" "1/1"
+printf "\n##### Applying $OPERATOR_DIRECTORY subscription #####\n"
+kubectl apply -k $OPERATOR_DIRECTORY/
+waitForPod "multiclusterhub-operator" "${CUSTOM_REGISTRY_IMAGE}" "1/1"
 printf "\n* Beginning deploy...\n"
 
 
@@ -178,7 +214,7 @@ if [[ " $@ " =~ " --watch " ]]; then
         whatsLeft=`oc -n ${TARGET_NAMESPACE} get pods | grep -v -e "Completed" -e "1/1     Running" -e "2/2     Running" -e "3/3     Running" -e "4/4     Running" -e "READY   STATUS" | wc -l`
         RUNNING_PODS=$(oc -n ${TARGET_NAMESPACE} get pods | grep -v -e "Completed" | tail -n +2 | wc -l | tr -d '[:space:]')
         if [ "https://$CONSOLE_URL" == "https://multicloud-console.apps.${HOST_URL}" ] && [ ${whatsLeft} -eq 0 ]; then
-            if [ $RUNNING_PODS -ge 35 ]; then
+            if [ $RUNNING_PODS -ge ${TOTAL_POD_COUNT} ]; then
                 COMPLETE=0
                 break
             fi
@@ -209,7 +245,7 @@ if [ "${OS}" == "darwin" ]; then
        echo "NOTE: watch executable not found.  Perform \"brew install watch\" to use the command above or use \"./start.sh --watch\" "
     fi
 else
-  echo "Deploying, use \"watch oc -n ${TARGET_NAMESPACE} get pods\" to monitor progress. Expect around 35 pods"
+  echo "Deploying, use \"watch oc -n ${TARGET_NAMESPACE} get pods\" to monitor progress. Expect around ${TOTAL_POD_COUNT} pods"
 fi
 
 

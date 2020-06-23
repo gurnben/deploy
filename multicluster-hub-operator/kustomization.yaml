@@ -9,8 +9,8 @@ generatorOptions:
   disableNameSuffixHash: true
 
 images:
-  - name: acm-custom-registry
-    newName: quay.io/open-cluster-management/acm-custom-registry
+  - name: multicluster-hub-custom-registry
+    newName: quay.io/open-cluster-management/multicluster-hub-custom-registry
     newTag: 1.0.0-SNAPSHOT-2020-05-12-23-58-57
 
 # list of Resource Config to be Applied
