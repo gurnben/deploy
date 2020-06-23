@@ -10,6 +10,11 @@
 # CONSTANTS
 TOTAL_POD_COUNT_1X=35
 TOTAL_POD_COUNT_2X=41
+INSTALL_IMAGE_ORG=open-cluster-management
+
+# INSTALLER OPTIONS
+PULL_SECRET_NAME="multiclusterhub-operator-pull-secret"
+
 
 function waitForPod() {
     FOUND=1
@@ -192,18 +197,39 @@ while [ -z $(kubectl get sa -n $TARGET_NAMESPACE -o name default) ]; do
     fi
 done;
 
-printf "\n##### Applying prerequisites\n"
-kubectl apply --openapi-patch=true -k prereqs/
+if [[ LEGACY_APPLY == "true" ]]; then
+    printf "\n##### Applying prerequisites\n"
+    kubectl apply --openapi-patch=true -k prereqs/
 
-printf "\n##### Applying $OPERATOR_DIRECTORY subscription #####\n"
-kubectl apply -k $OPERATOR_DIRECTORY/
-waitForPod "multiclusterhub-operator" "${CUSTOM_REGISTRY_IMAGE}" "1/1"
-printf "\n* Beginning deploy...\n"
+    printf "\n##### Applying $OPERATOR_DIRECTORY subscription #####\n"
+    kubectl apply -k $OPERATOR_DIRECTORY/
+    waitForPod "multiclusterhub-operator" "${CUSTOM_REGISTRY_IMAGE}" "1/1"
+    printf "\n* Beginning deploy...\n"
 
+    echo "* Applying the multiclusterhub-operator to install Red Hat Advanced Cluster Management for Kubernetes"
+    kubectl apply -k multiclusterhub
+    waitForPod "multicluster-operators-application" "" "4/4"
+else
+    # Create Pull Secret
+    if [ -f ./prereqs/pull-secret.yaml ]; then
+        printf "\n##### Applying pull-secret.yaml #####\n"
+        kubectl apply -f ./prereqs/pull-secret.yaml
+    fi
+    # Create Catalog Source
+    printf "\n##### Applying ${OPERATOR_DIRECTORY}/catalog-source.yaml #####\n"
+    kubectl apply -f ./${OPERATOR_DIRECTORY}/catalog-source.yaml
 
-echo "* Applying the multiclusterhub-operator to install Red Hat Advanced Cluster Management for Kubernetes"
-kubectl apply -k multiclusterhub
-waitForPod "multicluster-operators-application" "" "4/4"
+    echo "* Running multiclusterhub-operator-tests to install Red Hat Advanced Cluster Management for Kubernetes"
+    docker run --network host \
+        --env pullSecret=${PULL_SECRET_NAME} \
+        --env source="multicluster-hub-custom-registry" \
+        --env channel="snapshot-2.0" \
+        --env sourceNamespace=${TARGET_NAMESPACE} \
+        --env name="multicluster-hub" \
+        --volume ~/.kube/config:/opt/.kube/config \
+        --volume $my_dir/results:/results \
+        quay.io/$INSTALL_IMAGE_ORG/multiclusterhub-operator-tests:${DEFAULT_SNAPSHOT}
+fi;
 
 COMPLETE=1
 if [[ " $@ " =~ " --watch " ]]; then
